@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IKEA Management System</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+        .container { max-width: 900px; margin: 50px auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
+        .menu { display: flex; margin-bottom: 20px; }
+        .menu button { flex: 1; padding: 10px; border: none; background: #f0f0f0; cursor: pointer; }
+        .menu button.active { background: #ddd; }
+        input, textarea, button { width: 100%; margin: 10px 0; padding: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        table, th, td { border: 1px solid #ccc; }
+        th, td { padding: 10px; text-align: left; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="menu">
+            <button id="countryBtn">Country Management</button>
+            <button id="storeBtn" class="active">Store Management</button>
+        </div>
+
+        <div id="countryPanel" style="display: none;">
+            <h2>Country Management</h2>
+            <div>
+                <label for="fileInput">Upload CSV File</label>
+                <input type="file" id="fileInput" accept=".csv">
+                <button onclick="uploadCSV()">Upload</button>
+                
+                <h3>Uploaded Data</h3>
+                <textarea id="countryData" rows="10" placeholder="Uploaded data will appear here"></textarea>
+
+                <label for="requestBody">Request Body</label>
+                <textarea id="requestBody" rows="5" placeholder='Enter JSON request body here'></textarea>
+                
+                <button onclick="postUpdate()">Post Update</button>
+            </div>
+        </div>
+
+        <div id="storePanel">
+            <h2>Store Management</h2>
+            <div>
+                <h3>Get Roles for Client IDs</h3>
+                <label for="access_token">Access Token</label>
+                <input type="text" id="access_token" placeholder="Enter access token">
+
+<!-- Dropdown for selecting application name -->
+<label for="application_name">Application Name</label>
+<select id="application_name" onchange="updateDescription()">
+    <option value="" disabled selected>Select an application</option>
+</select><br></br>
+
+<!-- Button to Fetch Clients -->
+<button id="fetchClientsBtn">Fetch All Clients</button>
+
+<!-- Display Results -->
+<div id="clientResults"></div>
+
+
+                <label for="client_ids">Client IDs (comma-separated)</label>
+                <input type="text" id="client_ids" placeholder="Enter client IDs separated by commas">
+
+                <button onclick="getClientRoles()">Get Roles</button>
+                <button id="downloadCsvBtn" style="display: none;" onclick="downloadCSV()">Download CSV</button>
+
+                <div id="clientResults"></div>
+            </div>
+
+            <div>
+                <h3>Upload and Post API Rules</h3>
+
+                <label for="clientRoles">Client ID and Role Name (Manual Input)</label>
+                <textarea id="clientRoles" rows="5" placeholder="clientid#RoleName (one per line)"></textarea>
+
+                <label for="fileInput1">Upload Client IDs and Role Names (CSV)</label>
+                <input type="file" id="fileInput1" accept=".csv">
+                <button onclick="uploadFile()">Upload</button>
+
+                <!-- The request body textarea, hidden by default 
+                <label for="requestBody1">Request Body</label>
+                <textarea id="requestBody1" rows="5" placeholder='Enter JSON request body here'>
+                {
+                "description": "FMSRR rule for Store",
+                "condition": "user.businessUnit == client.externalReference"
+                }
+                </textarea>
+            -->
+                    <!-- Request Body Textarea (Initially Hidden) -->
+    <div id="requestBodyContainer" style="display: none;">
+        <label for="requestBody1">Request Body</label>
+        <textarea id="requestBody1" rows="5" placeholder="Enter JSON request body here"></textarea>
+    </div>
+                <button onclick="postAllRules()">Create in ATKOMST</button>
+
+                <div id="results"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+// Function to update the description based on the selected application name
+function updateDescription() {
+    // Get the selected application name
+    const applicationName = document.getElementById('application_name').value;
+
+    // Define the request body template
+    const requestBody = {
+        description: `${applicationName} rule for Store`,
+        condition: "user.businessUnit == client.externalReference"
+    };
+
+    // Display the textarea (request body) after selection
+    const requestBodyContainer = document.getElementById('requestBodyContainer');
+    requestBodyContainer.style.display = 'block';  // Show the textarea
+
+    // Update the textarea with the new request body
+    document.getElementById('requestBody1').value = JSON.stringify(requestBody, null, 2); // JSON.stringify with indentation
+}
+
+
+        // Function to fetch all clients with roles for a specific service
+async function fetchClientsWithRoles() {
+    const accessToken = document.getElementById('access_token').value;
+    const serviceName = document.getElementById('application_name').value;
+
+    if (!accessToken || !serviceName) {
+        alert('Please enter both an access token and select an application.');
+        return;
+    }
+    console.error(`Running this method for fetch the clientIDs:`);
+    const url = `/api/clients-with-roles?access_token=${accessToken}&service=${serviceName}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            console.error(`Running this method for fetch the clientIDs: RESPONSE ::: OK `);
+            const data = await response.json();
+            console.error(`Fetching roles for clientIds: ${data} `);
+            console.error('Received client IDs from server:', data);
+            const clientIdsString = data.join(','); 
+            document.getElementById('client_ids').value = clientIdsString; 
+            //displayClientResults(data);  // Function to display clients in the UI
+            console.error(`Results from the server fetching clients: ${data}`);
+        } else {
+            console.error(`Error fetching clients: ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Network error:', error);
+    }
+}
+
+// Function to display client results
+function displayClientResults(clients) {
+    const clientResultsDiv = document.getElementById('clientResults');
+    clientResultsDiv.innerHTML = '';
+
+    if (clients.length === 0) {
+        clientResultsDiv.textContent = 'No clients found for the selected service.';
+        return;
+    }
+
+    clients.forEach(client => {
+        const clientInfo = document.createElement('p');
+        clientInfo.textContent = `Client ID: ${client.client_id}, Roles: ${client.roles.join(', ')}`;
+        clientResultsDiv.appendChild(clientInfo);
+    });
+}
+
+// Event listener for the "Fetch All Clients" button
+document.getElementById('fetchClientsBtn').addEventListener('click', fetchClientsWithRoles);
+
+
+// Function to fetch services and populate the dropdown
+async function fetchAndPopulateServices() {
+    const accessToken = document.getElementById('access_token').value; // Get access token from the input field
+    const url = `/api/services?access_token=${accessToken}`;  // Send access token as query parameter
+
+    if (!accessToken) {
+        alert('Please enter an access token!');
+        return;
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json(); // Get the services array
+            populateSelect(data.results); // Call function to populate the dropdown
+        } else {
+            console.error(`Error fetching services for Application name: ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Network error:', error);
+    }
+}
+
+// Function to populate the dropdown with fetched services
+function populateSelect(services) {
+    const selectElement = document.getElementById('application_name');
+    
+    // Clear existing options (if any) and add new options
+    selectElement.innerHTML = '<option value="" disabled selected>Select an application</option>';
+    
+    services.forEach(service => {
+        const option = document.createElement('option');
+        option.value = service;
+        option.textContent = service;
+        selectElement.appendChild(option);
+    });
+}
+
+// Call the function when the user enters the access token and loads services
+document.getElementById('access_token').addEventListener('change', fetchAndPopulateServices);
+
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Set default value for the textarea
+    document.getElementById('requestBody1').value = JSON.stringify({
+        description: "FMSRR rule for Store",
+        condition: "user.businessUnit == client.externalReference"
+    }, null, 2); // Format the JSON with indentation
+});
+
+        // Function to switch between menu tabs
+        function switchTab(tab) {
+            const storePanel = document.getElementById('storePanel');
+            const countryPanel = document.getElementById('countryPanel');
+
+            if (tab === 'store') {
+                storePanel.style.display = 'block';
+                countryPanel.style.display = 'none';
+                document.getElementById('storeBtn').classList.add('active');
+                document.getElementById('countryBtn').classList.remove('active');
+            } else {
+                storePanel.style.display = 'none';
+                countryPanel.style.display = 'block';
+                document.getElementById('countryBtn').classList.add('active');
+                document.getElementById('storeBtn').classList.remove('active');
+            }
+        }
+
+        // Event listeners for menu buttons
+        document.getElementById('storeBtn').addEventListener('click', () => switchTab('store'));
+        document.getElementById('countryBtn').addEventListener('click', () => switchTab('country'));
+
+        let csvData = [];  // Global variable to store data for CSV download
+
+        // Function to upload and display CSV data for Country Management
+        async function uploadCSV() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a CSV file.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const content = e.target.result;
+                const rows = content.split('\n').map(row => row.trim()).filter(row => row);
+                const parsedData = rows.map(row => {
+                    const [client_id, country_name, country_code, businessUnit] = row.split(',').map(item => item.trim());
+                    return { client_id, country_name, country_code, businessUnit };
+                });
+
+                const textarea = document.getElementById('countryData');
+                textarea.value = parsedData.map(data => 
+                    `${data.client_id}, ${data.country_name}, ${data.country_code}, ${data.businessUnit}`
+                ).join('\n');
+            };
+
+            reader.readAsText(file);
+        }
+
+        // Function to post the data
+        async function postUpdate() {
+            const access_token = document.getElementById('access_token').value;
+            const countryDataText = document.getElementById('countryData').value;
+            const requestBody = document.getElementById('requestBody').value;
+
+            if (!access_token || !countryDataText || !requestBody) {
+                alert('Please provide all required inputs.');
+                return;
+            }
+
+            const countryData = countryDataText.split('\n').map(line => line.trim()).filter(line => line);
+
+            for (const line of countryData) {
+                const [client_id, country_name, country_code, businessUnit] = line.split(',').map(item => item.trim());
+
+                if (!client_id || !country_name || !country_code || !businessUnit) {
+                    console.error(`Invalid data format: ${line}`);
+                    continue;
+                }
+
+                try {
+                    // Call the API for each client_id and other details
+                    const response = await fetch('/post-country-data', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ client_id, country_name, country_code, businessUnit, access_token, requestBody })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        console.log(`API call successful for clientId=${client_id}`);
+                    } else {
+                        console.error(`Error posting data for Client ID: ${client_id}`);
+                    }
+                } catch (error) {
+                    console.error(`Error posting data for Client ID: ${client_id}: ${error.message}`);
+                }
+            }
+
+            alert('All API calls completed');
+        }
+
+        // Function to fetch roles for multiple client IDs
+        async function getClientRoles() {
+            const client_ids = document.getElementById('client_ids').value;
+            const access_token = document.getElementById('access_token').value;
+            const application_name = document.getElementById('application_name').value; // Get application name from input
+
+            const response = await fetch('/get-client-roles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_ids, access_token, application_name })
+            });
+
+           
+            const data = await response.json();
+            displayClientResults(data.results);
+
+            // // Prepare data for CSV download
+            // csvData = data.results.flatMap(result => 
+            //     result.role_ids.map(role_id => ({ client_id: result.client_id, role_id ,role_names}))
+            // );
+
+            // Prepare data for CSV download
+csvData = data.results.flatMap(result => 
+    result.role_ids.map((role_id, index) => ({
+        client_id: result.client_id,
+        role_id: role_id,
+        role_name: result.role_names[index]  // Fetch the role_name corresponding to the role_id
+    }))
+);
+
+
+            // Show the "Download CSV" button
+            if (csvData.length > 0) {
+                document.getElementById('downloadCsvBtn').style.display = 'inline-block';
+            }
+        }
+
+        // Function to display roles for each client ID in a table
+        function displayClientResults(results) {
+            const clientResultsDiv = document.getElementById('clientResults');
+            clientResultsDiv.innerHTML = '';
+
+            if (results.length === 0) {
+                clientResultsDiv.innerHTML = '<p>No results found</p>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            const headerRow = table.insertRow();
+            headerRow.innerHTML = '<th>Client ID</th><th>Role ID</th><th>Role Name</th>';
+           /* 
+            results.forEach(result => {
+                result.role_ids.forEach(role_id => {
+                    const row = table.insertRow();
+                    row.innerHTML = `<td>${result.client_id}</td><td>${role_id}</td><td>${result.role_names[i]}</td>`;
+                });
+            }); 
+*/
+results.forEach(result => {
+    result.role_ids.forEach((role_id, index) => {
+        // Use the index to get the corresponding role_name
+        const role_name = result.role_names[index];
+        const row = table.insertRow();
+        row.innerHTML = `<td>${result.client_id}</td><td>${role_id}</td><td>${role_name}</td>`;
+    });
+});
+
+            clientResultsDiv.appendChild(table);
+        }
+
+        // Function to download CSV
+        function downloadCSV() {
+            const csvContent = "data:text/csv;charset=utf-8," + csvData.map(item => `${item.client_id},${item.role_id},${item.role_name}`).join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "client_roles.csv");
+            document.body.appendChild(link);
+            link.click();
+        }
+
+        // Function to upload file and append data to textarea
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput1');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a CSV file.');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = async function (e) {
+                const content = e.target.result;
+                const rows = content.split('\n').map(row => row.trim()).filter(row => row);
+
+                // Update textarea with CSV data
+                const textarea = document.getElementById('clientRoles');
+                textarea.value = rows.join('\n');
+
+                // Optionally, process the uploaded CSV data here
+                // Example: Parsing client_roles for further actions
+            };
+
+            reader.readAsText(file);
+        }
+
+        // Function to post all rules based on textarea input
+        async function postAllRules() {
+    const access_token = document.getElementById('access_token').value;
+    const clientRolesText = document.getElementById('clientRoles').value;
+    const requestBody1 = document.getElementById('requestBody1').value;
+
+    // Validate inputs
+    if (!access_token || !clientRolesText || !requestBody1) {
+        alert('Please provide all required inputs.');
+        return;
+    }
+
+    // Split clientRolesText by new lines, trim each line, and filter out empty lines
+    const clientRoles = clientRolesText.split('\n').map(line => line.trim()).filter(line => line);
+
+    for (const line of clientRoles) {
+        alert('inside for loop.');
+        // Split the line into client_id, role_id, and role_name (role_name is not used in the API call)
+        const [client_id, role_id, role_name] = line.split(',').map(item => item.trim());
+
+        // Check for valid client_id and role_id
+        if (!client_id || !role_id) {
+            console.error(`Invalid data format: ${line}`);
+            continue;
+        }
+
+        // Post the rule for each client_id and role_id
+        try {
+            alert('inside try loop.');
+            const response = await fetch(`/post-rule`, {
+                method: 'POST',  // As per your requirement, GET is used, although typically POST is for sending data
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_id, role_id, access_token, requestBody1 })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                alert('inside ok.');
+                console.log(`API call successful for clientId=${client_id}, roleId=${role_id}`);
+            } else {
+                console.error(`Error posting rule for Client ID: ${client_id}, Role ID: ${role_id}. Response:`, data);
+            }
+
+        } catch (error) {
+            console.error(`Error posting rule for Client ID: ${client_id}, Role ID: ${role_id}: ${error.message}`);
+        }
+    }
+
+    alert('All API calls completed for Store.');
+}
+
+
+        // Helper function to fetch roles for a given client ID
+        async function fetchRoles(client_id, access_token) {
+            const response = await fetch(`/get-client-roles`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ client_ids: client_id, access_token, application_name: 'FMSRR' })
+            });
+
+            const data = await response.json();
+            return data.results.find(result => result.client_id === client_id)?.role_ids || [];
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+    // Attach the event listener to the textarea
+    document.getElementById('clientRoles').addEventListener('input', function() {
+        const clientRolesValue = this.value.trim(); // Get the trimmed value of the textarea
+        const requestBodyContainer = document.getElementById('requestBodyContainer');
+
+        // If there's content, show the request body container, otherwise hide it
+        if (clientRolesValue.length > 0) {
+            requestBodyContainer.style.display = 'block';  // Show
+        } else {
+            requestBodyContainer.style.display = 'none';   // Hide
+        }
+    });
+});
+
+
+
+
+    </script>
+</body>
+</html>
